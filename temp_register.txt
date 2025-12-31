@@ -1,0 +1,350 @@
+import React, { useState } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, ScrollView, Platform, KeyboardAvoidingView, Image, Alert } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import * as ImagePicker from 'expo-image-picker';
+import * as ExpoLocation from 'expo-location';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { storage } from '../../config/firebase';
+import { useAuth } from '../../context/AuthContext';
+import { colors } from '../../styles/colors';
+import { spacing } from '../../styles/spacing';
+import { typography } from '../../styles/typography';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import { GOOGLE_MAPS_CONFIG } from '../../config/googleMaps';
+
+export default function RegisterScreen({ navigation }: any) {
+    // Basic Auth
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [fullName, setFullName] = useState('');
+    const [phoneNumber, setPhoneNumber] = useState('');
+
+    // Details
+    const [dob, setDob] = useState('');
+    const [gender, setGender] = useState('');
+    const [age, setAge] = useState('');
+    const [height, setHeight] = useState('');
+    const [weight, setWeight] = useState('');
+    const [address, setAddress] = useState('');
+    const [aadharNumber, setAadharNumber] = useState('');
+
+    // Aadhar Photo
+    const [aadharImage, setAadharImage] = useState<string | null>(null);
+    const [loading, setLoading] = useState(false);
+    const [locationLoading, setLocationLoading] = useState(false);
+
+    // DateTimePicker State
+    const [date, setDate] = useState(new Date());
+    const [showDatePicker, setShowDatePicker] = useState(false);
+
+    const { register } = useAuth();
+
+    const onDateChange = (event: any, selectedDate?: Date) => {
+        setShowDatePicker(false);
+        if (selectedDate) {
+            setDate(selectedDate);
+            setDob(selectedDate.toLocaleDateString('en-GB'));
+
+            // Calculate Age
+            const today = new Date();
+            let ageVal = today.getFullYear() - selectedDate.getFullYear();
+            const m = today.getMonth() - selectedDate.getMonth();
+            if (m < 0 || (m === 0 && today.getDate() < selectedDate.getDate())) {
+                ageVal--;
+            }
+            setAge(ageVal.toString());
+        }
+    };
+
+    const pickImage = async () => {
+        let result = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            allowsEditing: true,
+            aspect: [4, 3],
+            quality: 0.8,
+        });
+
+        if (!result.canceled) {
+            setAadharImage(result.assets[0].uri);
+        }
+    };
+
+    const uploadImage = async (uri: string) => {
+        try {
+            const response = await fetch(uri);
+            const blob = await response.blob();
+            const filename = `aadhar/${email || 'temp'}_${Date.now()}.jpg`;
+            const storageRef = ref(storage, filename);
+            await uploadBytes(storageRef, blob);
+            return await getDownloadURL(storageRef);
+        } catch (error) {
+            console.error("Upload failed", error);
+            throw error;
+        }
+    };
+
+    const handleUseCurrentLocation = async () => {
+        setLocationLoading(true);
+        try {
+            let { status } = await ExpoLocation.requestForegroundPermissionsAsync();
+            if (status !== 'granted') {
+                Alert.alert('Permission Denied', 'Permission to access location was denied');
+                setLocationLoading(false);
+                return;
+            }
+
+            let location = await ExpoLocation.getCurrentPositionAsync({});
+            const { latitude, longitude } = location.coords;
+
+            // Use Google Maps Geocoding API
+            const GOOGLE_MAPS_API_KEY = GOOGLE_MAPS_CONFIG.API_KEY;
+            const geocodingUrl = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${GOOGLE_MAPS_API_KEY}`;
+
+            const response = await fetch(geocodingUrl);
+            const data = await response.json();
+
+            if (data.status === 'OK' && data.results.length > 0) {
+                // Get the formatted address from the first result
+                const formattedAddress = data.results[0].formatted_address;
+                setAddress(formattedAddress);
+            } else {
+                Alert.alert('Error', 'Unable to fetch address from location');
+            }
+        } catch (error: any) {
+            Alert.alert('Error fetching location', error.message);
+        } finally {
+            setLocationLoading(false);
+        }
+    };
+
+    const handleRegister = async () => {
+        if (!fullName || !email || !password || !phoneNumber || !aadharNumber) {
+            Alert.alert('Missing Fields', 'Please fill in all required fields.');
+            return;
+        }
+        if (!aadharImage) {
+            Alert.alert('Missing Photo', 'Please upload your Aadhar card photo.');
+            return;
+        }
+
+        setLoading(true);
+        try {
+            const photoURL = await uploadImage(aadharImage);
+            await register(email, password, 'player', {
+                displayName: fullName,
+                phoneNumber,
+                dob,
+                gender,
+                age,
+                height,
+                weight,
+                address,
+                aadharNumber,
+                aadharPhotoURL: photoURL
+            });
+            Alert.alert('Success', 'Profile created successfully!');
+        } catch (error: any) {
+            Alert.alert('Registration Failed', error.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const InputField = ({ icon, placeholder, value, onChangeText, secureTextEntry = false, keyboardType = 'default', half = false, multiline = false, numberOfLines = 1, rightIcon, onRightIconPress, rightIconLoading }: any) => (
+        <View style={[styles.inputWrapper, half && { flex: 0.48 }, multiline && { alignItems: 'flex-start' }]}>
+            <View style={[styles.iconContainer, multiline && { paddingTop: 14 }]}>
+                <Ionicons name={icon} size={20} color={colors.primary} />
+            </View>
+            <TextInput
+                style={[styles.input, multiline && { height: 100, textAlignVertical: 'top' }]}
+                placeholder={placeholder}
+                placeholderTextColor="#94A3B8"
+                value={value}
+                onChangeText={onChangeText}
+                secureTextEntry={secureTextEntry}
+                keyboardType={keyboardType}
+                autoCapitalize={keyboardType === 'email-address' ? 'none' : 'sentences'}
+                multiline={multiline}
+                numberOfLines={numberOfLines}
+                textContentType={icon === 'location-outline' ? "fullStreetAddress" : "none"}
+            />
+            {rightIcon && (
+                <TouchableOpacity onPress={onRightIconPress} style={{ padding: 12 }}>
+                    {rightIconLoading ? (
+                        <ActivityIndicator size="small" color={colors.primary} />
+                    ) : (
+                        <Ionicons name={rightIcon} size={20} color={colors.primary} />
+                    )}
+                </TouchableOpacity>
+            )}
+        </View>
+    );
+
+    return (
+        <LinearGradient colors={colors.gradients.primary as any} style={styles.container}>
+            <SafeAreaView style={styles.safeArea}>
+                <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.content}>
+                    <View style={styles.header}>
+                        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+                            <Ionicons name="arrow-back" size={24} color="#FFF" />
+                        </TouchableOpacity>
+                        <Text style={styles.headerTitle}>New Player Profile</Text>
+                        <View style={{ width: 24 }} />
+                    </View>
+
+                    <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+
+                        <View style={styles.section}>
+                            <Text style={styles.sectionHeader}>Account & Contact</Text>
+                            <InputField icon="person-outline" placeholder="Full Name" value={fullName} onChangeText={setFullName} />
+                            <InputField icon="mail-outline" placeholder="Email Address" value={email} onChangeText={setEmail} keyboardType="email-address" />
+                            <InputField icon="lock-closed-outline" placeholder="Password" value={password} onChangeText={setPassword} secureTextEntry />
+                            <InputField icon="call-outline" placeholder="Phone Number" value={phoneNumber} onChangeText={setPhoneNumber} keyboardType="phone-pad" />
+                            <InputField
+                                icon="location-outline"
+                                placeholder="Full Address"
+                                value={address}
+                                onChangeText={setAddress}
+                                multiline
+                                numberOfLines={3}
+                                rightIcon="locate"
+                                onRightIconPress={handleUseCurrentLocation}
+                                rightIconLoading={locationLoading}
+                            />
+                        </View>
+
+                        <View style={styles.section}>
+                            <Text style={styles.sectionHeader}>Personal Details</Text>
+                            <View style={styles.row}>
+                                <TouchableOpacity onPress={() => setShowDatePicker(true)} style={[styles.inputWrapper, { flex: 0.48 }]}>
+                                    <View style={styles.iconContainer}>
+                                        <Ionicons name="calendar-outline" size={20} color={colors.primary} />
+                                    </View>
+                                    <View style={{ justifyContent: 'center', height: 50 }}>
+                                        <Text style={{ color: dob ? colors.text : "#94A3B8", fontSize: 16 }}>
+                                            {dob || "DOB"}
+                                        </Text>
+                                    </View>
+                                </TouchableOpacity>
+                                <InputField icon="hourglass-outline" placeholder="Age" value={age} onChangeText={setAge} keyboardType="numeric" half />
+                            </View>
+
+                            <Text style={styles.label}>Gender</Text>
+                            <View style={styles.genderContainer}>
+                                {['Male', 'Female', 'Others'].map((opt) => (
+                                    <TouchableOpacity
+                                        key={opt}
+                                        style={[styles.genderOption, gender === opt && styles.genderOptionSelected]}
+                                        onPress={() => setGender(opt)}
+                                    >
+                                        <Text style={[styles.genderText, gender === opt && styles.genderTextSelected]}>{opt}</Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+                        </View>
+
+                        <View style={styles.section}>
+                            <Text style={styles.sectionHeader}>Physical Stats</Text>
+                            <View style={styles.row}>
+                                <InputField icon="resize-outline" placeholder="Height (cm)" value={height} onChangeText={setHeight} keyboardType="numeric" half />
+                                <InputField icon="scale-outline" placeholder="Weight (kg)" value={weight} onChangeText={setWeight} keyboardType="numeric" half />
+                            </View>
+                        </View>
+
+                        <View style={styles.section}>
+                            <Text style={styles.sectionHeader}>Identity Verification</Text>
+                            <InputField icon="card-outline" placeholder="Aadhar Number" value={aadharNumber} onChangeText={setAadharNumber} keyboardType="numeric" />
+
+                            <TouchableOpacity style={styles.uploadBox} onPress={pickImage}>
+                                {aadharImage ? (
+                                    <Image source={{ uri: aadharImage }} style={styles.uploadedImage} />
+                                ) : (
+                                    <View style={styles.uploadPlaceholder}>
+                                        <Ionicons name="cloud-upload-outline" size={40} color={colors.primary} />
+                                        <Text style={styles.uploadText}>Upload Aadhar Card Photo</Text>
+                                        <Text style={styles.uploadSubtext}>Tap to select from gallery</Text>
+                                    </View>
+                                )}
+                                {aadharImage && (
+                                    <View style={styles.editBadge}>
+                                        <Ionicons name="pencil" size={16} color="#FFF" />
+                                    </View>
+                                )}
+                            </TouchableOpacity>
+                        </View>
+
+                        <TouchableOpacity style={styles.registerButton} onPress={handleRegister} disabled={loading}>
+                            {loading ? <ActivityIndicator color="#FFF" /> : (
+                                <>
+                                    <Text style={styles.registerButtonText}>Submit Registration</Text>
+                                    <Ionicons name="arrow-forward" size={20} color="#FFF" style={{ marginLeft: 8 }} />
+                                </>
+                            )}
+                        </TouchableOpacity>
+
+                        <View style={styles.footer}>
+                            <Text style={styles.footerText}>Already registered? </Text>
+                            <TouchableOpacity onPress={() => navigation.navigate('Login')}>
+                                <Text style={styles.loginLink}>Log In</Text>
+                            </TouchableOpacity>
+                        </View>
+
+                        <View style={{ height: 40 }} />
+                    </ScrollView>
+                </KeyboardAvoidingView>
+                {showDatePicker && (
+                    <DateTimePicker
+                        value={date}
+                        mode="date"
+                        display="default"
+                        onChange={onDateChange}
+                        maximumDate={new Date()}
+                    />
+                )}
+            </SafeAreaView>
+        </LinearGradient>
+    );
+}
+
+const styles = StyleSheet.create({
+    container: { flex: 1 },
+    safeArea: { flex: 1 },
+    content: { flex: 1 },
+    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: spacing.l, paddingVertical: spacing.m },
+    backButton: { padding: 8 },
+    headerTitle: { fontSize: 20, fontWeight: '700', color: '#FFF' },
+
+    scrollContent: { paddingHorizontal: spacing.l, paddingBottom: spacing.xl },
+
+    section: { backgroundColor: '#FFF', borderRadius: 16, padding: spacing.m, marginBottom: spacing.m, shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 10, elevation: 3 },
+    sectionHeader: { fontSize: 14, fontWeight: '700', color: colors.textSecondary, marginBottom: spacing.m, textTransform: 'uppercase', letterSpacing: 0.5 },
+
+    inputWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surfaceHighlight, borderRadius: 12, marginBottom: 12, borderWidth: 1, borderColor: colors.border },
+    iconContainer: { paddingHorizontal: 12 },
+    input: { flex: 1, paddingVertical: 14, fontSize: 16, color: colors.text },
+
+    row: { flexDirection: 'row', justifyContent: 'space-between' },
+
+    uploadBox: { height: 180, backgroundColor: colors.surfaceHighlight, borderRadius: 16, borderStyle: 'dashed', borderWidth: 2, borderColor: colors.primaryLight, justifyContent: 'center', alignItems: 'center', overflow: 'hidden', marginTop: 4 },
+    uploadPlaceholder: { alignItems: 'center' },
+    uploadText: { fontSize: 16, fontWeight: '600', color: colors.primary, marginTop: 8 },
+    uploadSubtext: { fontSize: 12, color: colors.textSecondary, marginTop: 4 },
+    uploadedImage: { width: '100%', height: '100%', resizeMode: 'cover' },
+    editBadge: { position: 'absolute', bottom: 10, right: 10, backgroundColor: colors.primary, padding: 8, borderRadius: 20 },
+
+    registerButton: { flexDirection: 'row', backgroundColor: colors.primary, borderRadius: 16, paddingVertical: 18, justifyContent: 'center', alignItems: 'center', marginTop: spacing.m, shadowColor: colors.primary, shadowOpacity: 0.4, shadowOffset: { width: 0, height: 4 }, elevation: 8 },
+    registerButtonText: { fontSize: 18, fontWeight: '700', color: '#FFF' },
+
+    footer: { flexDirection: 'row', justifyContent: 'center', marginTop: spacing.l },
+    footerText: { fontSize: 14, color: 'rgba(255,255,255,0.8)' },
+    loginLink: { fontSize: 14, fontWeight: '700', color: '#FFF', textDecorationLine: 'underline' },
+
+    label: { fontSize: 14, fontWeight: '600', color: colors.textSecondary, marginBottom: 8, marginTop: 4 },
+    genderContainer: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.s },
+    genderOption: { flex: 1, paddingVertical: 12, borderWidth: 1, borderColor: colors.border, borderRadius: 12, alignItems: 'center', marginHorizontal: 4, backgroundColor: colors.surfaceHighlight },
+    genderOptionSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
+    genderText: { fontSize: 14, color: colors.textSecondary, fontWeight: '600' },
+    genderTextSelected: { color: '#FFF' }
+});

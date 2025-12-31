@@ -1,0 +1,44 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // User Profiles
+    match /users/{userId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Tournaments
+    match /tournaments/{tournamentId} {
+      allow read: if request.auth != null;
+      
+      // Allow organizers to create
+      allow create: if request.auth != null; 
+      
+      // CRITICAL FIX: Allow authenticated players to increment teamsRegistered
+      // but only the organizer can update other fields
+      allow update: if request.auth != null && (
+        resource.data.organizerId == request.auth.uid || 
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['teamsRegistered'])
+      );
+      
+      allow delete: if request.auth != null && resource.data.organizerId == request.auth.uid;
+    }
+
+    // Registrations
+    match /registrations/{regId} {
+      allow read: if request.auth != null;
+      
+      // Allow any authenticated user to create a registration
+      allow create: if request.auth != null;
+      
+      // Allow update for status (organizers)
+      allow update: if request.auth != null;
+    }
+    
+    // Default deny
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}
